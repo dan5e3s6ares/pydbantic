@@ -17,9 +17,7 @@ class Redis:
 
     async def get(self, key):
         cache = await self.redis.get(key)
-        if cache:
-            return loads(cache)[0]
-        return None
+        return loads(cache)[0] if cache else None
         
     async def set(self, cached_key, row_and_flag: tuple):
         row, flags = row_and_flag

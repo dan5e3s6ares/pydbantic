@@ -114,10 +114,7 @@ class DataBaseModelAttribute:
             primary_key = self.table['model'].__metadata__.tables[self.foreign_model]['primary_key']
             return getattr(value, primary_key)
 
-        if self.serialized:
-            return dumps(value)
-
-        return value
+        return dumps(value) if self.serialized else value
 
     def __lt__(self, value) -> DataBaseModelCondition:
         values = self.process_value(value)
@@ -201,10 +198,10 @@ class DataBaseModel(BaseModel):
 
         if isinstance(field['type'], typing._GenericAlias):
             for sub in field['type'].__args__:
-                
+
                 if isinstance(sub, ForwardRef):
                     database_model = sub.__forward_value__
-        
+
                 elif issubclass(sub, DataBaseModel):
                     if database_model:
                         raise Exception(f"Cannot Specify two DataBaseModels in Union[] for {field['name']}")
@@ -220,7 +217,7 @@ class DataBaseModel(BaseModel):
         module = imp.new_module(missing_module)
         sys.modules[missing_module] = module
 
-    @classmethod 
+    @classmethod
     def resolve_missing_attribute(cls, missing_error: str, expected_type=None):
         cls.__metadata__.database.log.warning(f"detected {missing_error} - attempting to self correct")
         try:
@@ -231,12 +228,13 @@ class DataBaseModel(BaseModel):
             missing_mod = ''.join(
                 missing_error.split("Can't get attribute")[1].split('on <module')
             ).split('from')[0].split(' ')[3][1:-4]
-            
-            if not missing_mod in sys.modules:
-                mod = imp.new_module(missing_mod)
-            else:
-                mod = sys.modules[missing_mod]
-            
+
+            mod = (
+                sys.modules[missing_mod]
+                if missing_mod in sys.modules
+                else imp.new_module(missing_mod)
+            )
+
             if expected_type:
                 (missing_class, ) = [
                     v[1] for _, v in cls.__metadata__.tables[expected_type]['column_map'].items()
@@ -244,7 +242,7 @@ class DataBaseModel(BaseModel):
                 ]
             else:
                 missing_class = cls.__metadata__.tables[cls.__name__]['column_map'][missing_attr][1]
-            
+
             setattr(mod, missing_attr, missing_class)
         except Exception as e:
             raise f"Failed to resolve {missing_error} with expected_type of {expected_type}"
@@ -401,8 +399,9 @@ class DataBaseModel(BaseModel):
         force update forward refs of all backward referncing DataBaseModels
         """
         for _, model_field in cls.__fields__.items():
-            data_base_model = cls.check_if_subtype({'type': model_field.type_})
-            if data_base_model:
+            if data_base_model := cls.check_if_subtype(
+                {'type': model_field.type_}
+            ):
                 data_base_model.update_forward_refs()
                 
         
@@ -422,7 +421,7 @@ class DataBaseModel(BaseModel):
         if not alias:
             alias = {}
         if not include:
-            include = [f for f in cls.__fields__]
+            include = list(cls.__fields__)
 
         primary_key = None
         unique_keys = set()
@@ -450,7 +449,11 @@ class DataBaseModel(BaseModel):
                 primary_key = field_property
             if 'unique' in config:
                 unique_keys.add(field_property)
-            if 'type' in config and config['type'] == 'array' and not primary_key == field_property:
+            if (
+                'type' in config
+                and config['type'] == 'array'
+                and primary_key != field_property
+            ):
                 array_fields.add(field_property)
 
         if not model_fields:
@@ -466,7 +469,7 @@ class DataBaseModel(BaseModel):
                 model_fields.append({'name': field_name, 'type': field.type_, 'required': field.required})
 
         name = cls.__name__
-        primary_key = model_fields[0]['name'] if not primary_key else primary_key
+        primary_key = primary_key or model_fields[0]['name']
         if name not in cls.__metadata__.tables or update:
 
             cls.__metadata__.tables[name] = {
@@ -480,13 +483,12 @@ class DataBaseModel(BaseModel):
         link_tables = []
         for i, field in enumerate(model_fields):
             
-            data_base_model = cls.check_if_subtype(field)
-            if data_base_model:
+            if data_base_model := cls.check_if_subtype(field):
                 # ensure DataBaseModel also exists in Database, even if not already
                 # explicity added
                 data_base_model.update_forward_refs()
                 cls.__metadata__.database.add_table(data_base_model)
-                
+
                 # create a string or foreign table column to be used to reference 
                 # other table
                 if not update:
@@ -499,11 +501,14 @@ class DataBaseModel(BaseModel):
                 serialize = False
 
                 cls.__metadata__.tables[name]['column_map'][field['name']] = (
-                    cls.__metadata__.database.get_translated_column_type(foreign_key_type if not serialize else list)[0],
+                    cls.__metadata__.database.get_translated_column_type(
+                        list if serialize else foreign_key_type
+                    )[0],
                     data_base_model,
                     serialize,
-                    field['name'] in array_fields
+                    field['name'] in array_fields,
                 )
+
 
                 # store field name in map to quickly determine attribute is tied to 
                 # foreign table
@@ -558,13 +563,13 @@ class DataBaseModel(BaseModel):
 
         values = {**data}
         primary_key = self.__metadata__.tables[name]['primary_key']
-        
+
         link_chain = [] 
 
+        skip = False
         for k, v in data.items():
             
             serialize = self.__metadata__.tables[name]['column_map'][k][2]
-            skip = False
             if k in self.__metadata__.tables[name]['foreign_keys']:
 
                 # use the foreign DataBaseModel's primary key / value 
@@ -573,8 +578,8 @@ class DataBaseModel(BaseModel):
                 foreign_primary_key = foreign_type.__metadata__.tables[foreign_name]['primary_key']
 
                 link_table = self.__metadata__.tables[name]['relationships'][foreign_name][0]
-                
-                foreign_values = [v] if not isinstance(v, list) else v
+
+                foreign_values = v if isinstance(v, list) else [v]
                 fk_values = []
                 local_value = getattr(self, primary_key)
 
@@ -586,7 +591,7 @@ class DataBaseModel(BaseModel):
 
                     if v is None:
                         continue
-                        
+
                     if isinstance(v, foreign_type):
                         v = v.dict()
 
@@ -600,14 +605,14 @@ class DataBaseModel(BaseModel):
                         foreign_primary_key_value = v
 
                     fk_values.append(foreign_primary_key_value)
-                    
+
                     serialize_local = self.__metadata__.tables[name]['column_map'][primary_key][2]
                     serialize_foreign = self.__metadata__.tables[foreign_name]['column_map'][foreign_primary_key][2]
 
-                    
+
                     if serialize_local:
                         local_value = dumps(local_value)
-                    
+
                     if serialize_foreign:
                         foreign_primary_key_value = dumps(foreign_primary_key_value)
 
@@ -643,7 +648,7 @@ class DataBaseModel(BaseModel):
                         )
                     )
                     result = await database.execute(remove_deleted)
-                
+
                 # remove existing references, if any, to match removed
                 if update and not fk_values:
                     link_chain.append(
@@ -654,7 +659,7 @@ class DataBaseModel(BaseModel):
                         )
                     )
                 continue
-            
+
             serialize = self.__metadata__.tables[name]['column_map'][k][2]
 
             if serialize:
@@ -693,18 +698,17 @@ class DataBaseModel(BaseModel):
         # convert keyword arguments into DataBaseModelConditions
         for cond, value in where.items():
             is_serialized = cls.__metadata__.tables[cls.__name__]['column_map'][cond][2]
-            if not isinstance(cond, DataBaseModelAttribute) and  hasattr(cls, cond):
-                cond = getattr(cls, cond)
-                conditions.append(cond == value)
-
-            else:
+            if isinstance(cond, DataBaseModelAttribute) or not hasattr(cls, cond):
                 raise Exception(f"{cond} is not a valid column in {table}")
-            
-            
+
+
+            cond = getattr(cls, cond)
+            conditions.append(cond == value)
+
             query_value = value
             if cond.serialized:
                 query_value = dumps(value)
-        
+
         for condition in conditions:               
             try:
                 query = query.where(condition.condition) 
@@ -758,9 +762,9 @@ class DataBaseModel(BaseModel):
     @classmethod
     def gt(cls, column: str, value: Any) -> DataBaseModelCondition:
         table = cls.get_table()
-        if not column in table.c:
+        if column not in table.c:
             raise Exception(f"{column} is not a valid column in {table}")
-        
+
         return DataBaseModelCondition(
             f"{column} > {value}",
             table.c[column] > value,
@@ -770,7 +774,7 @@ class DataBaseModel(BaseModel):
     @classmethod
     def gte(cls, column: str, value: Any) -> DataBaseModelCondition:
         table = cls.get_table()
-        if not column in table.c:
+        if column not in table.c:
             raise Exception(f"{column} is not a valid column in {table}")
         return DataBaseModelCondition(
             f"{column} >= {value}",
@@ -782,7 +786,7 @@ class DataBaseModel(BaseModel):
     @classmethod
     def lt(cls, column: str, value: Any) -> DataBaseModelCondition:
         table = cls.get_table()
-        if not column in table.c:
+        if column not in table.c:
             raise Exception(f"{column} is not a valid column in {table}")
         return DataBaseModelCondition(
             f"{column} < {value}",
@@ -793,7 +797,7 @@ class DataBaseModel(BaseModel):
     @classmethod
     def lte(cls, column: str, value: Any) -> DataBaseModelCondition:
         table = cls.get_table()
-        if not column in table.c:
+        if column not in table.c:
             raise Exception(f"{column} is not a valid column in {table}")
         return DataBaseModelCondition(
             f"{column} <= {value}",
@@ -808,7 +812,7 @@ class DataBaseModel(BaseModel):
         `column`
         """
         table = cls.get_table()
-        if not column in table.c:
+        if column not in table.c:
             raise Exception(f"{column} is not a valid column in {table}")
 
         return DataBaseModelCondition(
@@ -820,14 +824,14 @@ class DataBaseModel(BaseModel):
     @classmethod
     def desc(cls, column) -> UnaryExpression:
         table = cls.get_table()
-        if not column in table.c:
+        if column not in table.c:
             raise Exception(f"{column} is not a valid column in {table}")
         return table.c[column].desc()
 
     @classmethod
     def asc(cls, column) -> UnaryExpression:
         table = cls.get_table()
-        if not column in table.c:
+        if column not in table.c:
             raise Exception(f"{column} is not a valid column in {table}")
         return table.c[column].asc()
     
@@ -876,21 +880,21 @@ class DataBaseModel(BaseModel):
         foreign_models = []
         for column_name in cls.__metadata__.tables[cls.__name__]['column_map']:
             if column_name in cls.__metadata__.tables[cls.__name__]['foreign_keys']:
-            
+
                 # foreign model
                 foreign_model = cls.__metadata__.tables[cls.__name__]['column_map'][column_name][1]
                 if foreign_model.__name__ in models_selected:
                     # skipping model, as is already selected in current query
                     continue
                 foreign_models.append((foreign_model, column_name))
-                
+
 
         ref_table = model_ref.get_table()
         table = cls.get_table()
         primary_key = cls.__metadata__.tables[cls.__name__]['primary_key']
-        
+
         link_table = cls.__metadata__.tables[model_ref.__name__]['relationships'][cls.__name__][0]
-        
+
         session_query = session_query.outerjoin(
             link_table, 
             getattr(ref_table.c, model_ref_primary_key) == getattr(link_table.c, f"{model_ref.__name__}_{model_ref_primary_key}")
@@ -904,8 +908,8 @@ class DataBaseModel(BaseModel):
                 primary_key
             )
         )
-        if not cls is root_model:
-            session_query = session_query.add_columns(*[c for c in table.c])
+        if cls is not root_model:
+            session_query = session_query.add_columns(*list(table.c))
             tables_to_select.append((table, cls, column_ref, model_ref))
         models_selected.add(cls.__name__)
         models_selected.add(link_table.name)
@@ -917,7 +921,7 @@ class DataBaseModel(BaseModel):
                 cls, primary_key, column_ref,
                 session_query, tables_to_select, models_selected
             )
-        
+
         return session_query, tables_to_select
 
     @classmethod

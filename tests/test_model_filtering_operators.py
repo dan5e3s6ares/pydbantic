@@ -7,7 +7,7 @@ async def test_model_filtering_operators(loaded_database_and_model):
 
     all_employees = await Employees.all()
 
-    print(f"Number of Employees is ", len(all_employees))
+    print("Number of Employees is ", len(all_employees))
 
     assert len(all_employees) == 200
 
@@ -76,7 +76,7 @@ async def test_model_filtering_operators(loaded_database_and_model):
     mid_salary_employees = await Employees.filter(
         Employees.salary.matches([30000, 40000])
     )
-    
+
     assert len(mid_salary_employee) == 2
 
     mid_salary_employees = await Employees.filter(
@@ -98,5 +98,5 @@ async def test_model_filtering_operators(loaded_database_and_model):
         ),
         Employees.is_employed == True
     )
-    
+
     assert len(mid_salary_employees) == 4

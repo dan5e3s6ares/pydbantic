@@ -35,14 +35,16 @@ class Database():
             self.db_type = 'POSTGRES'
         elif 'mysql' in self.DB_URL.lower(): 
             self.db_type = 'MYSQL'
- 
+
         self.testing = testing
         self.engine = sqlalchemy.create_engine(
             self.DB_URL,
             connect_args={'check_same_thread': False}
-            if 'sqlite' in str(self.DB_URL) else {},
+            if 'sqlite' in self.DB_URL
+            else {},
         )
-        
+
+
         self.DEFAULT_TRANSLATIONS = DEFAULT_TRANSLATIONS
 
         self.metadata = sqlalchemy.MetaData(self.engine)
@@ -54,7 +56,7 @@ class Database():
         # logging setup # 
         self.log = logger
         self.debug = debug
-        level = None if not self.debug else 'DEBUG'
+        level = 'DEBUG' if self.debug else None
         self.setup_logger(logger=self.log, level=level)
 
         # setup table_metadata table
@@ -68,13 +70,13 @@ class Database():
 
         for table in tables:
             table.update_forward_refs()
-            
+
         for table in tables:
             self.add_table(table)
-        
+
         for _, table in DatabaseInit.__metadata__.tables.items():
             table['model'].generate_model_attributes()
-        
+
         if self.testing:
             self.testing_setup()
 
@@ -89,7 +91,7 @@ class Database():
             column_config = self.DEFAULT_TRANSLATIONS[self.db_type][input_type]
         else:
             column_config = self.DEFAULT_TRANSLATIONS[self.db_type]['default']
-        
+
         if (
             self.db_type == 'MYSQL' and 
             column_config['column_type'] is sqlalchemy.LargeBinary and
@@ -109,7 +111,7 @@ class Database():
             format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
             datefmt='%m-%d %H:%M'
         )
-        self.log = logging.getLogger(f'pydb')
+        self.log = logging.getLogger('pydb')
         self.log.propogate = False
         self.log.setLevel(level)
         
@@ -120,11 +122,12 @@ class Database():
             data_base_model = table.check_if_subtype({'type': field.type_})
             table_fields[field.name] = {
                 'name': field.name,
-                'type': field.type_ if not data_base_model else data_base_model,
-                'required': field.required
+                'type': data_base_model or field.type_,
+                'required': field.required,
             }
+
             table_fields_list.append(table_fields[field.name])
-        
+
         table_fields['primary_key'] = table.__metadata__.tables[table.__name__]['primary_key']
 
         table_meta = self.TableMeta(
@@ -132,7 +135,7 @@ class Database():
             model=table_fields, 
             columns=table.convert_fields_to_columns(model_fields=table_fields_list, update=True)[0]
         )
-        
+
         if not existing:
             await table_meta.insert()
         else:
@@ -140,49 +143,50 @@ class Database():
 
     def add_table(self, table: DataBaseModel):
         
-        if not table in self.tables:
+        if table not in self.tables:
             self.tables.append(table)
         table.setup(self)
 
     def testing_setup(self):
-        if self.testing:
-            if self.TableMeta:
-                try:
-                    TableMeta.__metadata__.tables[TableMeta.__name__]['table'].drop()
-                except Exception:
-                    pass
-                self.metadata.remove(TableMeta.__metadata__.tables[TableMeta.__name__]['table'])
-                TableMeta.__metadata__.tables[TableMeta.__name__]['table'].create(self.engine)
+        if not self.testing:
+            return
+        if self.TableMeta:
+            try:
+                TableMeta.__metadata__.tables[TableMeta.__name__]['table'].drop()
+            except Exception:
+                pass
+            self.metadata.remove(TableMeta.__metadata__.tables[TableMeta.__name__]['table'])
+            TableMeta.__metadata__.tables[TableMeta.__name__]['table'].create(self.engine)
 
-            dropped = set()
-            for table in self.tables:
-                for _, link_table in table.__metadata__.tables[table.__name__]['relationships'].items():
-                    if not link_table[0].name in dropped:
-                        dropped.add(link_table[0].name)
-                        try:
-                            link_table[0].metadata.tables[link_table[0].name].drop()
-                        except Exception:
-                            pass
-                try:
-                    table.__metadata__.tables[table.__name__]['table'].drop()
-                except Exception:
-                    pass
-                self.metadata.remove(table.__metadata__.tables[table.__name__]['table'])
+        dropped = set()
+        for table in self.tables:
+            for _, link_table in table.__metadata__.tables[table.__name__]['relationships'].items():
+                if link_table[0].name not in dropped:
+                    dropped.add(link_table[0].name)
+                    try:
+                        link_table[0].metadata.tables[link_table[0].name].drop()
+                    except Exception:
+                        pass
+            try:
+                table.__metadata__.tables[table.__name__]['table'].drop()
+            except Exception:
+                pass
+            self.metadata.remove(table.__metadata__.tables[table.__name__]['table'])
 
-                table.__metadata__.tables[table.__name__]['table'].create(self.engine)
+            table.__metadata__.tables[table.__name__]['table'].create(self.engine)
 
-            created = set()
-            for table in self.tables:
-                for _, link_table in table.__metadata__.tables[table.__name__]['relationships'].items():
-                    if not link_table[0].name in dropped:
-                        created.add(link_table[0].name)
-                        link_table[0].create(self.engine)
+        created = set()
+        for table in self.tables:
+            for _, link_table in table.__metadata__.tables[table.__name__]['relationships'].items():
+                if link_table[0].name not in dropped:
+                    created.add(link_table[0].name)
+                    link_table[0].create(self.engine)
 
     @staticmethod
     def determine_migration_order(migrations_required: dict):
         migration_order = []
         for table_name, mig_details in migrations_required.copy().items():
-            if not table_name in migrations_required:
+            if table_name not in migrations_required:
                 continue
 
             mig_details = migrations_required.pop(table_name)
@@ -193,9 +197,9 @@ class Database():
             if mig_details['table'] in migration_order:
                 continue 
 
-            for foreign_key in mig_details['table'].__metadata__.tables[table_name]['foreign_keys']:
+            for _ in mig_details['table'].__metadata__.tables[table_name]['foreign_keys']:
                 migration_order.extend(Database.determine_migration_order(migrations_required))
-            
+
             migration_order.append(mig_details['table'])
         return migration_order
 
@@ -226,9 +230,12 @@ class Database():
                 await check.save()
 
         except Exception as e:
-            self.log.warning(f"unable to reserve database for migration - perhaps another worker is running?")
+            self.log.warning(
+                "unable to reserve database for migration - perhaps another worker is running?"
+            )
 
-        if not database_init.reservation == reservation:
+
+        if database_init.reservation != reservation:
             while database_init.status != 'ready':
                 self.log.warning(f"waiting for database migration to complete - status {database_init}")
                 await asyncio.sleep(5)
@@ -245,15 +252,15 @@ class Database():
             table_meta = await self.TableMeta.get(table_name=table.__name__)
             if table_meta:
                 meta_tables[table_meta.table_name] = table_meta
-    
+
         # determine list of tables requiring migration
         migrations_required = {}
 
         for table in self.tables:
             is_migration_required = False
             migration_blame = []
-            
-            if not table.__name__ in meta_tables:
+
+            if table.__name__ not in meta_tables:
                 table_ref = table.__metadata__.tables[table.__name__].get('table') 
                 await self.update_table_meta(table)
                 if table_ref is not None:
@@ -263,33 +270,36 @@ class Database():
             existing_model = meta_tables[table.__name__].model
             # check for new columns
             for field in table.__fields__:
-                if not field in existing_model:
+                if field not in existing_model:
                     is_migration_required = True
                     migration_blame.append(f"New Column: {field}")
                     continue
-                
+
                 try:
                     issubclass(existing_model[field]['type'], DataBaseModel)
                 except TypeError:
-                    if not table.__fields__[field].type_ == existing_model[field]['type']:
+                    if (
+                        table.__fields__[field].type_
+                        != existing_model[field]['type']
+                    ):
                         migration_blame.append(
                             f"Modified Column: {field} - from {existing_model[field]['type']} to {table.__fields__[field].type_}"
                         )
                         is_migration_required = True
                     continue
-                    
+
                 if issubclass(existing_model[field]['type'], DataBaseModel):
                     current_model = DataBaseModel.check_if_subtype({"type": table.__fields__[field].type_})
-                    if not current_model == existing_model[field]['type']:
+                    if current_model != existing_model[field]['type']:
                         migration_blame.append(f"Modified Column: {field} from {existing_model[field]['type']} -> {current_model}")
                         is_migration_required = True
-                elif not table.__fields__[field].type_ == existing_model[field]['type']:
+                elif table.__fields__[field].type_ != existing_model[field]['type']:
                     migration_blame.append(
                         f"Modified Column: {field} - from {existing_model[field]['type']} to {table.__fields__[field].type_}"
                     )
                     is_migration_required = True
 
-                
+
             table_p_key = table.__metadata__.tables[table.__name__]['primary_key']
             if existing_model.get('primary_key') and (table_p_key != existing_model['primary_key'] and
                 existing_model['primary_key'] in table.__fields__
@@ -298,14 +308,14 @@ class Database():
                 migration_blame.append(
                     f"Primary Key Changed from {existing_model['primary_key']} to {table_p_key}"
                 )
-                
+
                 is_migration_required = True
 
             # check for deleted columns
             for field in meta_tables[table.__name__].model:
                 if field == 'primary_key': 
                     continue
-                if not field in table.__fields__:
+                if field not in table.__fields__:
                     is_migration_required = True
                     migration_blame.append(f"Deleted Column: {field}")
             if is_migration_required:
@@ -315,7 +325,7 @@ class Database():
         # migrations should run first against foreign tables, if needed so that dependent tables 
         # are able to successfully migrated, if needed. 
         migration_order = Database.determine_migration_order(migrations_required.copy())
-        
+
         if migrations_required:
             self.log.warning(f"Migrations may be required. Will attempt in order: {migration_order}")
 
@@ -323,7 +333,7 @@ class Database():
             migration_blame = migrations_required[table.__name__]['blame']
             self.log.warning(f"Migration Required: {migration_blame}")
             # migration required - re-create table with new schema
-            to_select =[c for c in meta_tables[table.__name__].model]
+            to_select = list(meta_tables[table.__name__].model)
 
             # create old table , named with timestamp 
             self.metadata.remove(table.__metadata__.tables[table.__name__]['table'])
@@ -343,7 +353,7 @@ class Database():
             old_table = None
             if aliases:
                 self.metadata.remove(table.__metadata__.tables[table.__name__]['table'])
-                
+
                 old_table = sqlalchemy.Table(
                     table.__name__,
                     self.metadata,
@@ -352,7 +362,7 @@ class Database():
 
                 table.__metadata__.tables[table.__name__]['table'] = old_table
 
-            if not 'primary_key' in meta_tables[table.__name__].model:
+            if 'primary_key' not in meta_tables[table.__name__].model:
                 meta_tables[table.__name__].model['primary_key'] = [
                     *meta_tables[table.__name__].model.keys()
                 ][0]
@@ -369,7 +379,7 @@ class Database():
                 self.log.warning(f"dropping related link-table {rel_table[0].name}")
                 rel_table[0].drop(self.engine)
                 self.metadata.remove(rel_table[0])
-                
+
             if old_table is None:
                 old_table = sqlalchemy.Table(
                     table.__name__,
@@ -378,22 +388,23 @@ class Database():
                 )
 
             table.__metadata__.tables[table.__name__]['table'] = old_table
-            
+
             # this is needed for tables migrated from 1.3.X -> 1.4.X
             [setattr(c, 'identity', None) for c in meta_tables[table.__name__].columns] 
 
             migration_table = sqlalchemy.Table(
-                table.__name__ + f'_{int(time.time())}',
+                f'{table.__name__}_{int(time.time())}',
                 self.metadata,
                 *meta_tables[table.__name__].columns,
             )
-            
+
+
             migration_table.create(self.engine)
 
             # read from existing table and feed into migration table 
             # selecting only previously existing columns &&
             # columns which still exist in the current model.
-            
+
             insert_into_migration = migration_table.insert()
 
             values = []
@@ -404,21 +415,21 @@ class Database():
                     if k in aliases:
                         row_data[aliases[k]] = row_data.pop(k)
                         continue
-                    if not k in migration_table.c:
+                    if k not in migration_table.c:
                         del row_data[k]
-                    
+
                 values.append(
                     await row.serialize(row_data)
                 )
 
-            
+
             for query_values, links in values:
                 await self.execute(insert_into_migration, query_values)
                 try:
                     await asyncio.gather(*links)
                 except Exception:
                     pass
-        
+
             # drop existing table
             old_config = deepcopy(table.__metadata__.tables[table.__name__])
             old_table = old_config['table']
@@ -453,29 +464,29 @@ class Database():
                     f"Rolling back from {migration_table.fullname} to {table.__name__}"
                     )
                 )
-                
+
                 # triggr rollback
                 new_table.drop()
                 self.metadata.remove(new_table)
 
                 # get old columns from TableMeta 
                 meta_table = await self.TableMeta.get(table_name=table.__name__)
-                
+
                 rollback_table = sqlalchemy.Table(
                     table.__name__,
                     self.metadata,
                     *meta_table.columns,
 
                 )
-                
+
                 rollback_table.create(self.engine)
-                
+
                 # using existing rows that originally built
                 # previous migration table
                 rollback_rows = migration_rows
 
                 insert_into_rollback = rollback_table.insert()
-                
+
                 values = []
                 for row in rollback_rows:
                     row_data = {}
@@ -484,28 +495,28 @@ class Database():
                         if k in aliases:
                             row_data[aliases[k]] = row_data.pop(k)
                             continue
-                        if not k in rollback_table.c:
+                        if k not in rollback_table.c:
                             del row_data[k]
-                        
+
                     values.append(
                         row.serialize(row_data)
                     )
 
                 values = await asyncio.gather(*values)
-                
+
                 for query_values, links in values:
                     await self.execute(insert_into_rollback, query_values)
-                
+
                 raise e
-                
+
             # update TableMeta with new Model
             await self.update_table_meta(table, existing=True)
-            
+
             table.__metadata__.tables[table.__name__]['table'] = new_table
             table.generate_model_attributes()
 
         if reservation == database_init.reservation:
-            self.log.warning(f"database init - ready")
+            self.log.warning("database init - ready")
             database_init.status == 'ready'
             await database_init.update()
             
@@ -585,7 +596,7 @@ class Database():
             while True:
                 status = yield connection
                 if status == 'finished':
-                    self.log.debug(f"db_connection - closed")
+                    self.log.debug("db_connection - closed")
                     break
 
     async def __aenter__(self):
@@ -603,11 +614,13 @@ class Database():
 
     async def __aexit__(self, exc_type, exc, tb):
         for conn_id in self.connection_map.copy():
-            if not self.connection_map[conn_id]['conn'].ag_running:
-                if time.time() - self.connection_map[conn_id]['last'] > 120: 
-                    try:
-                        await self.connection_map[conn_id].asend('finished')
-                    except StopAsyncIteration:
-                        pass
-                    del self.connection_map[conn_id]
+            if (
+                not self.connection_map[conn_id]['conn'].ag_running
+                and time.time() - self.connection_map[conn_id]['last'] > 120
+            ):
+                try:
+                    await self.connection_map[conn_id].asend('finished')
+                except StopAsyncIteration:
+                    pass
+                del self.connection_map[conn_id]
         
