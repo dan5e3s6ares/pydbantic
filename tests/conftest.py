@@ -201,18 +201,22 @@ async def loaded_database_and_model_with_cache(database_with_cache):
 @pytest.fixture()
 def init_model():
     with open('example.py', 'w') as e:
-        e.write(f"""
+        e.write(
+            """
 from pydbantic import DataBaseModel
 class Data(DataBaseModel):
     a: int
     b: float
     c: str = 'test'
     i: str
-""")
+"""
+        )
+
     from example import Data
     yield Data
     with open('example.py', 'w') as e:
-        e.write(f"""
+        e.write(
+            """
 from pydbantic import DataBaseModel
 class Data(DataBaseModel):
     a: int
@@ -220,14 +224,16 @@ class Data(DataBaseModel):
     c: str = 'test'
     d: tuple = (1,2)
     i: str
-""")
+"""
+        )
 
 @pytest.fixture()
 def new_model_1():
     from example import Data
     yield Data
     with open('example.py', 'w') as e:
-        e.write(f"""
+        e.write(
+            """
 from pydbantic import DataBaseModel
 class Data(DataBaseModel):
     a: int
@@ -235,7 +241,8 @@ class Data(DataBaseModel):
     c: str = 'test'
     d: list = [1,2]
     i: str
-""")
+"""
+        )
 
 @pytest.fixture()
 def new_model_2():
@@ -255,7 +262,8 @@ class Data(DataBaseModel):
     from example import Data
     yield Data
     with open('example.py', 'w') as e:
-        e.write(f"""
+        e.write(
+            """
 import uuid
 from pydbantic import DataBaseModel, PrimaryKey, Default
 
@@ -269,14 +277,16 @@ class Data(DataBaseModel):
     d: list = PrimaryKey()
     e: str = Default(default=get_uuid)
     i: str
-""")
+"""
+        )
 
 @pytest.fixture()
 def new_model_3():
     from example import Data
     yield Data
     with open('example.py', 'w') as e:
-        e.write(f"""
+        e.write(
+            """
 import uuid
 from pydbantic import DataBaseModel, PrimaryKey, Default
 
@@ -290,7 +300,8 @@ class Data(DataBaseModel):
     d: list
     e: str = PrimaryKey(default=get_uuid)
     i: str
-""")
+"""
+        )
 @pytest.fixture()
 def new_model_4():
     from example import Data
@@ -310,7 +321,8 @@ class SubData(BaseModel):
 
 """)
     with open('example.py', 'w') as e:
-        e.write(f"""
+        e.write(
+            """
 
 from pydbantic import DataBaseModel, PrimaryKey, Default
 from example_sub import get_uuid, SubData
@@ -323,7 +335,8 @@ class Data(DataBaseModel):
     e: str = PrimaryKey(default=get_uuid)
     i: str
     sub: SubData = None
-""")
+"""
+        )
 @pytest.fixture()
 def new_model_5():
     from example import Data, SubData
@@ -349,7 +362,8 @@ class SubData(BaseModel):
 
 """)
     with open('example.py', 'w') as e:
-        e.write(f"""
+        e.write(
+            """
 from typing import Optional
 from pydbantic import DataBaseModel, PrimaryKey, Default
 from example_sub import get_uuid, SubData
@@ -367,7 +381,8 @@ class Data(DataBaseModel):
     i: str
     sub: SubData = None
     related: Optional[Related] = None
-""")
+"""
+        )
 
 @pytest.fixture()
 def new_model_7():
@@ -388,7 +403,8 @@ class SubData(BaseModel):
 
 """)
     with open('example.py', 'w') as e:
-        e.write(f"""
+        e.write(
+            """
 
 from pydbantic import DataBaseModel, PrimaryKey, Default
 from example_sub import get_uuid, SubData
@@ -406,7 +422,8 @@ class Data(DataBaseModel):
     i: str
     sub: SubData = None
     related: Optional[Related] = None
-""")
+"""
+        )
 
 
 def endpoint_router():

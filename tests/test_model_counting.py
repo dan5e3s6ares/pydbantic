@@ -8,7 +8,7 @@ async def test_model_counting(loaded_database_and_model):
     all_employees = await Employees.all()
     employee_count = await Employees.count()
 
-    print(f"Number of Employees is ", employee_count)
+    print("Number of Employees is ", employee_count)
 
     assert employee_count == len(all_employees)
 

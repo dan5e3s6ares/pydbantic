@@ -37,7 +37,7 @@ async def test_database(db_url):
         'is_employed': False, 
         'date_employed': None
     }
-    
+
     employee = Employee(**new_employee)
     await employee.insert()
     emp_info = await EmployeeInfo.filter(bio_id=employee.employee_info.bio_id)
@@ -76,10 +76,10 @@ async def test_database(db_url):
             emp_info.ssn = 1234567890
             await emp_info.save()
 
-            assert False, f"This should have thrown an Integrity Exception for Unique field"
+            assert False, "This should have thrown an Integrity Exception for Unique field"
         except Exception:
             pass
-        
+
     filtered_employee = await Employee.filter(is_employed=True)
     assert len(filtered_employee) > 0
 
@@ -90,5 +90,5 @@ async def test_database(db_url):
 
     filtered_employee = await Employee.filter(is_employed=False)
     assert len(filtered_employee) == 1
-    
+
     db.metadata.drop_all()
